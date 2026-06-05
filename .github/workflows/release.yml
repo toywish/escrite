@@ -14,7 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'windows-latest' # 构建 Windows 安装包 (.exe / .msi)
+          - platform: 'windows-latest'
+          - platform: 'macos-latest'
+          - platform: 'ubuntu-22.04'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -35,10 +37,21 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
       - name: Install dependencies
         run: npm ci
 
       - name: Build and Publish Tauri App
+        id: tauri_build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -48,3 +61,53 @@ jobs:
           releaseBody: '这是自动生成的正式版本安装包，请下载下方的安装文件。'
           releaseDraft: true # 创建为一个草稿版本，供您确认无误后手动发布
           prerelease: false
+
+      # ----------------- 打包 Windows 绿色解压版 -----------------
+      - name: Package Portable Zip (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          mkdir escrite-windows-x64
+          copy src-tauri/target/release/escrite.exe escrite-windows-x64/
+          Compress-Archive -Path escrite-windows-x64 -DestinationPath src-tauri/target/release/escrite-windows-x64.zip
+
+      - name: Upload Portable Zip (Windows)
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload v${{ steps.tauri_build.outputs.appVersion }} src-tauri/target/release/escrite-windows-x64.zip --clobber
+
+      # ----------------- 打包 macOS 绿色解压版 -----------------
+      - name: Package Portable Zip (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          ARCH=$(uname -m)
+          cd src-tauri/target/release/bundle/macos
+          zip -r ../../escrite-macos-${ARCH}.zip escrite.app
+
+      - name: Upload Portable Zip (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARCH=$(uname -m)
+          gh release upload v${{ steps.tauri_build.outputs.appVersion }} src-tauri/target/release/escrite-macos-${ARCH}.zip --clobber
+
+      # ----------------- 打包 Linux 绿色解压版 -----------------
+      - name: Package Portable Tarball (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then ARCH="x64"; fi
+          mkdir escrite-linux-${ARCH}
+          cp src-tauri/target/release/escrite escrite-linux-${ARCH}/
+          tar -czf src-tauri/target/release/escrite-linux-${ARCH}.tar.gz escrite-linux-${ARCH}
+
+      - name: Upload Portable Tarball (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "x86_64" ]; then ARCH="x64"; fi
+          gh release upload v${{ steps.tauri_build.outputs.appVersion }} src-tauri/target/release/escrite-linux-${ARCH}.tar.gz --clobber
