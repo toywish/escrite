@@ -1,0 +1,50 @@
+name: 'Publish Release'
+
+on:
+  push:
+    tags:
+      - 'v*' # 当推送以 v 开头的标签（如 v0.1.0）时触发构建与发布
+  workflow_dispatch: # 允许手动在 GitHub Actions 界面点击按钮触发
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest' # 构建 Windows 安装包 (.exe / .msi)
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and Publish Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__ # 自动从 tauri.conf.json 中提取版本号并创建 tag（如 v0.1.0）
+          releaseName: 'Escrite v__VERSION__'
+          releaseBody: '这是自动生成的正式版本安装包，请下载下方的安装文件。'
+          releaseDraft: true # 创建为一个草稿版本，供您确认无误后手动发布
+          prerelease: false
